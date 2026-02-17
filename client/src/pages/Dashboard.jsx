@@ -3,7 +3,7 @@ import axios from 'axios';
 import Papa from 'papaparse';
 import {
   Download, Search, MapPin, Upload, Trash2, MapPinOff, Check,
-  ChevronLeft, ChevronRight, Filter, X, RefreshCw, CheckCircle, AlertCircle, Info
+  ChevronLeft, ChevronRight, Filter, X, RefreshCw, CheckCircle, AlertCircle, Info, AlertTriangle
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -189,6 +189,41 @@ export default function Dashboard() {
     });
   };
 
+  // ── Erase ALL data (two-step: caution → confirm → delete) ──
+  const handleEraseAllData = () => {
+    // Step 1: Caution warning
+    setConfirmModal({
+      title: '⚠️ Erase All Data',
+      message: 'CAUTION: This will permanently DELETE all student records from the database. This action cannot be undone. All student names, codes, locations, routes — everything will be lost.',
+      danger: true,
+      confirmText: 'I Understand, Continue',
+      onConfirm: () => {
+        setConfirmModal(null);
+        // Step 2: Final confirmation
+        setTimeout(() => {
+          setConfirmModal({
+            title: 'Final Confirmation',
+            message: 'Are you absolutely sure? Type action cannot be reversed. All data will be permanently erased from the database.',
+            danger: true,
+            confirmText: 'Yes, Erase Everything',
+            onConfirm: async () => {
+              setConfirmModal(null);
+              try {
+                const res = await axios.post('/api/erase-all-data');
+                showToast(`All data erased. ${res.data.deleted} record(s) deleted.`, 'success');
+                setSelectedStudents([]);
+                fetchData();
+              } catch (err) {
+                console.error(err);
+                showToast('Failed to erase data.', 'error');
+              }
+            }
+          });
+        }, 200);
+      }
+    });
+  };
+
   // ── Bulk Upload ──
   const handleUploadCSV = () => {
     const templateCSV = 'student_id,student_code,student_name,section_name,branch_name,route_name\n';
@@ -317,6 +352,10 @@ export default function Dashboard() {
             </button>
             <button className="dash-btn danger" onClick={handleClearAll} title="Clear all student locations">
               <Trash2 size={15} /> Clear All
+            </button>
+            <button className="dash-btn" onClick={handleEraseAllData} title="Permanently delete all data"
+              style={{ background: '#fff', color: '#dc2626', borderColor: '#fca5a5' }}>
+              <AlertTriangle size={15} /> Erase Data
             </button>
           </div>
         </div>
@@ -622,7 +661,7 @@ export default function Dashboard() {
                 onClick={confirmModal.onConfirm}
                 style={{ padding: '8px 18px' }}
               >
-                {confirmModal.danger ? 'Yes, Proceed' : 'Confirm'}
+                {confirmModal.confirmText || (confirmModal.danger ? 'Yes, Proceed' : 'Confirm')}
               </button>
             </div>
           </div>

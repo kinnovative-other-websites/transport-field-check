@@ -124,6 +124,17 @@ app.post('/api/clear-selected-locations', async (req, res) => {
   }
 });
 
+// ── Erase ALL student data (permanent delete) ──
+app.post('/api/erase-all-data', async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM students');
+    res.json({ message: 'All student data erased permanently', deleted: result.rowCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ── Download CSV template for bulk upload ──
 app.get('/api/bulk-upload-template', (req, res) => {
   const headers = 'student_id,student_code,student_name,section_name,branch_name,route_name\n';
