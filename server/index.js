@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const multer = require('multer');
 const Papa = require('papaparse');
 const pool = require('./db');
@@ -10,7 +11,11 @@ const port = process.env.PORT || 3055;
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors());
+app.use(compression());  // gzip all responses — ~70% smaller on mobile
 app.use(express.json());
+
+// Health check
+app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 // Get all pending students for a branch
 app.get('/api/students/:branch', async (req, res) => {
@@ -157,35 +162,44 @@ app.post('/api/bulk-upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: `Missing columns: ${missingCols.join(', ')}` });
     }
 
-    let inserted = 0;
-    let updated = 0;
-
-    for (const row of rows) {
-      if (!row.student_id || !row.student_code || !row.student_name) continue; // skip invalid rows
-      const result = await pool.query(
-        `INSERT INTO students (student_id, student_code, student_name, section_name, branch_name, route_name)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (student_id) DO UPDATE SET
-           student_code = EXCLUDED.student_code,
-           student_name = EXCLUDED.student_name,
-           section_name = EXCLUDED.section_name,
-           branch_name = EXCLUDED.branch_name,
-           route_name = EXCLUDED.route_name
-         RETURNING (xmax = 0) AS is_insert`,
-        [
-          row.student_id.trim(),
-          row.student_code.trim(),
-          row.student_name.trim(),
-          (row.section_name || '').trim(),
-          row.branch_name.trim(),
-          row.route_name.trim()
-        ]
-      );
-      if (result.rows[0].is_insert) inserted++;
-      else updated++;
+    // Filter valid rows
+    const validRows = rows.filter(r => r.student_id && r.student_code && r.student_name);
+    if (validRows.length === 0) {
+      return res.status(400).json({ error: 'No valid rows found in CSV' });
     }
 
-    res.json({ message: 'Upload successful', inserted, updated, total: rows.length });
+    // Batch insert — single query instead of N individual queries
+    const values = [];
+    const placeholders = validRows.map((row, i) => {
+      const offset = i * 6;
+      values.push(
+        row.student_id.trim(),
+        row.student_code.trim(),
+        row.student_name.trim(),
+        (row.section_name || '').trim(),
+        row.branch_name.trim(),
+        row.route_name.trim()
+      );
+      return `($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5}, $${offset+6})`;
+    });
+
+    const result = await pool.query(
+      `INSERT INTO students (student_id, student_code, student_name, section_name, branch_name, route_name)
+       VALUES ${placeholders.join(', ')}
+       ON CONFLICT (student_id) DO UPDATE SET
+         student_code = EXCLUDED.student_code,
+         student_name = EXCLUDED.student_name,
+         section_name = EXCLUDED.section_name,
+         branch_name = EXCLUDED.branch_name,
+         route_name = EXCLUDED.route_name
+       RETURNING (xmax = 0) AS is_insert`,
+      values
+    );
+
+    const inserted = result.rows.filter(r => r.is_insert).length;
+    const updated = result.rows.length - inserted;
+
+    res.json({ message: 'Upload successful', inserted, updated, total: validRows.length });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
