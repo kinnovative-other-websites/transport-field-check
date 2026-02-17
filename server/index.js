@@ -74,7 +74,7 @@ app.post('/api/log-location', async (req, res) => {
     const query = `
       UPDATE students 
       SET latitude = $1, longitude = $2 
-      WHERE student_code = ANY($3) AND branch_name = $4
+      WHERE student_code = ANY($3) AND UPPER(branch_name) = UPPER($4)
     `;
     await pool.query(query, [latitude, longitude, student_codes, branch_name]);
     res.json({ message: 'Location logged successfully' });
