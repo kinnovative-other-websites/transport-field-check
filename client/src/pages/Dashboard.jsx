@@ -3,10 +3,32 @@ import axios from 'axios';
 import Papa from 'papaparse';
 import {
   Download, Search, MapPin, Upload, Trash2, MapPinOff, Check,
-  ChevronLeft, ChevronRight, Filter, X, RefreshCw, CheckCircle, AlertCircle, Info, AlertTriangle
+  ChevronLeft, ChevronRight, Filter, X, RefreshCw, CheckCircle, AlertCircle, Info, AlertTriangle, LogOut
 } from 'lucide-react';
 
 export default function Dashboard() {
+  // Authenticated axios instance
+  const api = useMemo(() => {
+    const instance = axios.create();
+    instance.interceptors.request.use(config => {
+      const token = localStorage.getItem('auth_token');
+      if (token) config.headers.Authorization = `Bearer ${token}`;
+      return config;
+    });
+    instance.interceptors.response.use(res => res, err => {
+      if (err.response?.status === 401) {
+        localStorage.removeItem('auth_token');
+        window.location.reload();
+      }
+      return Promise.reject(err);
+    });
+    return instance;
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('auth_token');
+    window.location.reload();
+  };
   const [data, setData] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -50,7 +72,7 @@ export default function Dashboard() {
   const fetchData = async (isSync = false) => {
     if (isSync) setSyncing(true); else setLoading(true);
     try {
-      const res = await axios.get('/api/all-data');
+      const res = await api.get('/api/all-data');
       setData(res.data);
     } catch (err) {
       console.error(err);
@@ -155,7 +177,7 @@ export default function Dashboard() {
       onConfirm: async () => {
         setConfirmModal(null);
         try {
-          await axios.post('/api/clear-all-locations');
+          await api.post('/api/clear-all-locations');
           showToast('All locations cleared successfully!', 'success');
           setSelectedStudents([]);
           fetchData();
@@ -177,7 +199,7 @@ export default function Dashboard() {
       onConfirm: async () => {
         setConfirmModal(null);
         try {
-          await axios.post('/api/clear-selected-locations', { student_codes: selectedStudents });
+          await api.post('/api/clear-selected-locations', { student_codes: selectedStudents });
           showToast(`Cleared locations for ${selectedStudents.length} student(s)`, 'success');
           setSelectedStudents([]);
           fetchData();
@@ -210,7 +232,7 @@ export default function Dashboard() {
             onConfirm: async () => {
               setConfirmModal(null);
               try {
-                const res = await axios.post('/api/delete-selected-students', { student_codes: selectedStudents });
+                const res = await api.post('/api/delete-selected-students', { student_codes: selectedStudents });
                 showToast(`${res.data.deleted} student(s) deleted permanently.`, 'success');
                 setSelectedStudents([]);
                 fetchData();
@@ -245,7 +267,7 @@ export default function Dashboard() {
             onConfirm: async () => {
               setConfirmModal(null);
               try {
-                const res = await axios.post('/api/erase-all-data');
+                const res = await api.post('/api/erase-all-data');
                 showToast(`All data erased. ${res.data.deleted} record(s) deleted.`, 'success');
                 setSelectedStudents([]);
                 fetchData();
@@ -282,7 +304,7 @@ export default function Dashboard() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await axios.post('/api/bulk-upload', formData, {
+      const res = await api.post('/api/bulk-upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       showToast(`Upload successful! ${res.data.inserted} inserted, ${res.data.updated} updated.`, 'success');
@@ -392,6 +414,11 @@ export default function Dashboard() {
             <button className="dash-btn" onClick={handleEraseAllData} title="Permanently delete all data"
               style={{ background: '#fff', color: '#dc2626', borderColor: '#fca5a5' }}>
               <AlertTriangle size={15} /> Erase Data
+            </button>
+            <div style={{ width: '1px', height: '28px', background: '#ddd', margin: '0 2px' }} />
+            <button className="dash-btn" onClick={handleLogout} title="Sign out"
+              style={{ padding: '8px 12px' }}>
+              <LogOut size={15} /> Logout
             </button>
           </div>
         </div>

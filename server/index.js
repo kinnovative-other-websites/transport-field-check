@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const Papa = require('papaparse');
 const pool = require('./db');
@@ -9,8 +10,48 @@ const app = express();
 const port = process.env.PORT || 3055;
 const upload = multer({ storage: multer.memoryStorage() });
 
+// Auth config (hardcoded credentials)
+const ADMIN_USER = process.env.ADMIN_USER || 'admin';
+const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
+const JWT_SECRET = process.env.JWT_SECRET || 'transport-field-check-secret-key-2026';
+
 app.use(cors());
 app.use(express.json());
+
+// ── Login endpoint ──
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  if (username === ADMIN_USER && password === ADMIN_PASS) {
+    const token = jwt.sign({ user: username, role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token, message: 'Login successful' });
+  } else {
+    res.status(401).json({ error: 'Invalid credentials' });
+  }
+});
+
+// ── Verify token endpoint ──
+app.get('/api/verify-token', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'No token' });
+  try {
+    jwt.verify(token, JWT_SECRET);
+    res.json({ valid: true });
+  } catch {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+});
+
+// Auth middleware (only for dashboard endpoints)
+const authMiddleware = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: 'Session expired. Please login again.' });
+  }
+};
 
 // Get all pending students for a branch
 app.get('/api/students/:branch', async (req, res) => {
@@ -84,8 +125,8 @@ app.post('/api/log-location', async (req, res) => {
   }
 });
 
-// Get all data
-app.get('/api/all-data', async (req, res) => {
+// Get all data (dashboard only)
+app.get('/api/all-data', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM students ORDER BY student_name ASC');
     res.json(result.rows);
@@ -96,7 +137,7 @@ app.get('/api/all-data', async (req, res) => {
 });
 
 // ── Clear ALL locations (latitude & longitude only) ──
-app.post('/api/clear-all-locations', async (req, res) => {
+app.post('/api/clear-all-locations', authMiddleware, async (req, res) => {
   try {
     await pool.query('UPDATE students SET latitude = NULL, longitude = NULL');
     res.json({ message: 'All locations cleared successfully' });
@@ -107,7 +148,7 @@ app.post('/api/clear-all-locations', async (req, res) => {
 });
 
 // ── Clear SELECTED locations ──
-app.post('/api/clear-selected-locations', async (req, res) => {
+app.post('/api/clear-selected-locations', authMiddleware, async (req, res) => {
   const { student_codes } = req.body;
   if (!student_codes || !Array.isArray(student_codes) || student_codes.length === 0) {
     return res.status(400).json({ error: 'Invalid student codes' });
@@ -125,7 +166,7 @@ app.post('/api/clear-selected-locations', async (req, res) => {
 });
 
 // ── Erase ALL student data (permanent delete) ──
-app.post('/api/erase-all-data', async (req, res) => {
+app.post('/api/erase-all-data', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM students');
     res.json({ message: 'All student data erased permanently', deleted: result.rowCount });
@@ -136,7 +177,7 @@ app.post('/api/erase-all-data', async (req, res) => {
 });
 
 // ── Delete SELECTED students (permanent) ──
-app.post('/api/delete-selected-students', async (req, res) => {
+app.post('/api/delete-selected-students', authMiddleware, async (req, res) => {
   const { student_codes } = req.body;
   if (!student_codes || !Array.isArray(student_codes) || student_codes.length === 0) {
     return res.status(400).json({ error: 'Invalid student codes' });
@@ -159,7 +200,7 @@ app.get('/api/bulk-upload-template', (req, res) => {
 });
 
 // ── Bulk upload students via CSV ──
-app.post('/api/bulk-upload', upload.single('file'), async (req, res) => {
+app.post('/api/bulk-upload', authMiddleware, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
