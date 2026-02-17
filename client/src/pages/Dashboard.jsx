@@ -189,6 +189,42 @@ export default function Dashboard() {
     });
   };
 
+  // ── Delete SELECTED students (permanent, two-step) ──
+  const handleDeleteSelected = () => {
+    if (selectedStudents.length === 0) return;
+    // Step 1: Caution
+    setConfirmModal({
+      title: '⚠️ Delete Selected Students',
+      message: `CAUTION: This will permanently DELETE ${selectedStudents.length} selected student record(s) from the database. Their names, codes, locations, and all data will be lost forever.`,
+      danger: true,
+      confirmText: 'I Understand, Continue',
+      onConfirm: () => {
+        setConfirmModal(null);
+        // Step 2: Final confirmation
+        setTimeout(() => {
+          setConfirmModal({
+            title: 'Final Confirmation',
+            message: `Permanently delete ${selectedStudents.length} student(s)? This cannot be undone.`,
+            danger: true,
+            confirmText: 'Yes, Delete Permanently',
+            onConfirm: async () => {
+              setConfirmModal(null);
+              try {
+                const res = await axios.post('/api/delete-selected-students', { student_codes: selectedStudents });
+                showToast(`${res.data.deleted} student(s) deleted permanently.`, 'success');
+                setSelectedStudents([]);
+                fetchData();
+              } catch (err) {
+                console.error(err);
+                showToast('Failed to delete selected students.', 'error');
+              }
+            }
+          });
+        }, 200);
+      }
+    });
+  };
+
   // ── Erase ALL data (two-step: caution → confirm → delete) ──
   const handleEraseAllData = () => {
     // Step 1: Caution warning
@@ -451,9 +487,14 @@ export default function Dashboard() {
           <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#111' }}>
             {selectedStudents.length} student{selectedStudents.length !== 1 ? 's' : ''} selected
           </span>
-          <button className="dash-btn danger" onClick={handleClearSelected} style={{ padding: '6px 12px' }}>
-            <MapPinOff size={15} /> Remove Locations
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="dash-btn danger" onClick={handleClearSelected} style={{ padding: '6px 12px' }}>
+              <MapPinOff size={15} /> Remove Locations
+            </button>
+            <button className="dash-btn" onClick={handleDeleteSelected} style={{ padding: '6px 12px', color: '#dc2626', borderColor: '#fca5a5' }}>
+              <Trash2 size={15} /> Delete Students
+            </button>
+          </div>
         </div>
       )}
 

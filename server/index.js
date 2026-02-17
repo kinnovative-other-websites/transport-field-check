@@ -135,6 +135,21 @@ app.post('/api/erase-all-data', async (req, res) => {
   }
 });
 
+// ── Delete SELECTED students (permanent) ──
+app.post('/api/delete-selected-students', async (req, res) => {
+  const { student_codes } = req.body;
+  if (!student_codes || !Array.isArray(student_codes) || student_codes.length === 0) {
+    return res.status(400).json({ error: 'Invalid student codes' });
+  }
+  try {
+    const result = await pool.query('DELETE FROM students WHERE student_code = ANY($1)', [student_codes]);
+    res.json({ message: `Deleted ${result.rowCount} student(s) permanently`, deleted: result.rowCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ── Download CSV template for bulk upload ──
 app.get('/api/bulk-upload-template', (req, res) => {
   const headers = 'student_id,student_code,student_name,section_name,branch_name,route_name\n';
