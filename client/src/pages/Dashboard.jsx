@@ -454,9 +454,11 @@ export default function Dashboard() {
               </button>
             )}
             {isAdmin && <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />}
-            <button className="dash-btn" onClick={handleExport}>
-              <Download size={15} /> Export
-            </button>
+            {isAdmin && (
+              <button className="dash-btn" onClick={handleExport}>
+                <Download size={15} /> Export
+              </button>
+            )}
             {isAdmin && (
               <>
                 <button className="dash-btn danger" onClick={handleClearAll} title="Clear all student locations">
