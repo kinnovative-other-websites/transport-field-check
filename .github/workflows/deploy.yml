@@ -35,6 +35,7 @@ jobs:
         source: "client/dist,server"
         target: "/var/www/transport-field-check"
         strip_components: 0
+        overwrite: true
 
     - name: Restart Application via SSH
       uses: appleboy/ssh-action@master

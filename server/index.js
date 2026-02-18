@@ -19,6 +19,8 @@ app.use(cors());
 app.use(express.json());
 
 // ── Login endpoint ──
+app.get('/api/version', (req, res) => res.json({ version: '1.1.0', timestamp: new Date().toISOString() }));
+
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   if (username === ADMIN_USER && password === ADMIN_PASS) {
