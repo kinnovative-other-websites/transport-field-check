@@ -6,6 +6,8 @@ import {
   ChevronLeft, ChevronRight, Filter, X, RefreshCw, CheckCircle, AlertCircle, Info, AlertTriangle, LogOut
 } from 'lucide-react';
 
+import MapView from '../components/MapView';
+
 export default function Dashboard() {
   // Authenticated axios instance
   const api = useMemo(() => {
@@ -36,6 +38,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [selectedStudents, setSelectedStudents] = useState([]);
+  const [viewMode, setViewMode] = useState('list'); // 'list' or 'map'
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -448,6 +451,34 @@ export default function Dashboard() {
             }} disabled={syncing} title="Sync data">
               <RefreshCw size={15} className={syncing ? 'sync-spin' : ''} /> {syncing ? 'Syncing...' : 'Sync'}
             </button>
+            <div style={{ width: '1px', height: '28px', background: '#ddd', margin: '0 2px' }} />
+            <div style={{ display: 'flex', background: '#f1f5f9', padding: '2px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <button 
+                onClick={() => setViewMode('list')}
+                style={{
+                  padding: '6px 12px', borderRadius: '6px', border: 'none', cursor: 'pointer',
+                  background: viewMode === 'list' ? 'white' : 'transparent',
+                  boxShadow: viewMode === 'list' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
+                  fontWeight: 600, fontSize: '0.82rem', color: viewMode === 'list' ? '#111' : '#64748b',
+                  display: 'flex', alignItems: 'center', gap: '6px', transition: 'all 0.15s'
+                }}
+              >
+                <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'currentColor', opacity: 0.5 }}></div> List
+              </button>
+              <button 
+                onClick={() => setViewMode('map')}
+                style={{
+                  padding: '6px 12px', borderRadius: '6px', border: 'none', cursor: 'pointer',
+                  background: viewMode === 'map' ? 'white' : 'transparent',
+                  boxShadow: viewMode === 'map' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
+                  fontWeight: 600, fontSize: '0.82rem', color: viewMode === 'map' ? '#111' : '#64748b',
+                  display: 'flex', alignItems: 'center', gap: '6px', transition: 'all 0.15s'
+                }}
+              >
+                <MapPin size={13} strokeWidth={2.5} /> Map
+              </button>
+            </div>
+            <div style={{ width: '1px', height: '28px', background: '#ddd', margin: '0 2px' }} />
             {isAdmin && (
               <button className="dash-btn primary" onClick={handleUploadCSV} disabled={uploading} title="Download template & upload CSV">
                 <Upload size={15} /> {uploading ? 'Uploading...' : 'Upload CSV'}
@@ -583,6 +614,22 @@ export default function Dashboard() {
       )}
 
       {/* ═══ Table ═══ */}
+      {/* ═══ Content (Map OR Table) ═══ */}
+      {viewMode === 'map' ? (
+        <div className="dash-fade">
+          <div style={{ background: 'white', padding: '10px', borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+             <MapView 
+                api={api} 
+                branchFilter={branchFilter}
+                routeFilter={routeFilter}
+             />
+          </div>
+          <div style={{ marginTop: '10px', fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', gap: '20px', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Info size={14} /> Only students with logged locations are shown on the map.</span>
+            {routeFilter && <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: 8, height: 8, borderRadius: '50%', background: '#3b82f6' }}></div> Showing path for: <strong>{routeFilter}</strong></span>}
+          </div>
+        </div>
+      ) : (
       <div className="dash-fade" style={{ background: 'white', borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', whiteSpace: 'nowrap' }}>
@@ -729,6 +776,7 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+      )}
 
       {/* ═══ Toast Notifications ═══ */}
       <div style={{ position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 9999, display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: '380px' }}>

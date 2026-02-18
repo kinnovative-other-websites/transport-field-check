@@ -262,6 +262,46 @@ app.get('/api/students-paginated', authMiddleware, async (req, res) => {
   }
 });
 
+// ── Get All Student Locations (for Map View) ──
+app.get('/api/locations', authMiddleware, async (req, res) => {
+  try {
+    const { branch, route } = req.query;
+    const params = [];
+    let whereClauses = ['latitude IS NOT NULL', 'longitude IS NOT NULL'];
+    let paramIndex = 1;
+
+    if (branch) {
+      whereClauses.push(`branch_name = $${paramIndex}`);
+      params.push(branch);
+      paramIndex++;
+    }
+
+    if (route) {
+      whereClauses.push(`route_name = $${paramIndex}`);
+      params.push(route);
+      paramIndex++;
+    }
+
+    const whereSQL = `WHERE ${whereClauses.join(' AND ')}`;
+
+    // Order by route and then student sequence (if available, else student_code)
+    // For now, ordering by route_name, then student_code to try and keep lines somewhat orderly
+    const query = `
+      SELECT student_id, student_code, student_name, branch_name, route_name, latitude, longitude
+      FROM students
+      ${whereSQL}
+      ORDER BY route_name ASC, student_code ASC
+    `;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+
+  } catch (err) {
+    console.error('Map Data Error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Middleware to restrict access to Admins only
 const adminOnly = (req, res, next) => {
   if (req.user && req.user.role === 'admin') {
