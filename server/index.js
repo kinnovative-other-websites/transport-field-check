@@ -11,21 +11,28 @@ const port = process.env.PORT || 3055;
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Auth config (hardcoded credentials)
+// Auth config (hardcoded credentials)
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
+const VIEW_USER = process.env.VIEW_USER || 'viewer';
+const VIEW_PASS = process.env.VIEW_PASS || 'view123';
 const JWT_SECRET = process.env.JWT_SECRET || 'transport-field-check-secret-key-2026';
 
 app.use(cors());
 app.use(express.json());
 
 // ── Login endpoint ──
-app.get('/api/version', (req, res) => res.json({ version: '1.1.0', timestamp: new Date().toISOString() }));
+app.get('/api/version', (req, res) => res.json({ version: '1.2.0', timestamp: new Date().toISOString() }));
 
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
+  
   if (username === ADMIN_USER && password === ADMIN_PASS) {
     const token = jwt.sign({ user: username, role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token, message: 'Login successful' });
+    res.json({ token, role: 'admin', message: 'Login successful' });
+  } else if (username === VIEW_USER && password === VIEW_PASS) {
+    const token = jwt.sign({ user: username, role: 'viewer' }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token, role: 'viewer', message: 'Login successful' });
   } else {
     res.status(401).json({ error: 'Invalid credentials' });
   }
@@ -255,8 +262,17 @@ app.get('/api/students-paginated', authMiddleware, async (req, res) => {
   }
 });
 
+// Middleware to restrict access to Admins only
+const adminOnly = (req, res, next) => {
+  if (req.user && req.user.role === 'admin') {
+    next();
+  } else {
+    res.status(403).json({ error: 'Access denied. Admin privileges required.' });
+  }
+};
+
 // ── Clear ALL locations (latitude & longitude only) ──
-app.post('/api/clear-all-locations', authMiddleware, async (req, res) => {
+app.post('/api/clear-all-locations', authMiddleware, adminOnly, async (req, res) => {
   try {
     await pool.query('UPDATE students SET latitude = NULL, longitude = NULL');
     res.json({ message: 'All locations cleared successfully' });
@@ -267,7 +283,7 @@ app.post('/api/clear-all-locations', authMiddleware, async (req, res) => {
 });
 
 // ── Clear SELECTED locations ──
-app.post('/api/clear-selected-locations', authMiddleware, async (req, res) => {
+app.post('/api/clear-selected-locations', authMiddleware, adminOnly, async (req, res) => {
   const { student_codes } = req.body;
   if (!student_codes || !Array.isArray(student_codes) || student_codes.length === 0) {
     return res.status(400).json({ error: 'Invalid student codes' });
@@ -285,7 +301,7 @@ app.post('/api/clear-selected-locations', authMiddleware, async (req, res) => {
 });
 
 // ── Erase ALL student data (permanent delete) ──
-app.post('/api/erase-all-data', authMiddleware, async (req, res) => {
+app.post('/api/erase-all-data', authMiddleware, adminOnly, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM students');
     res.json({ message: 'All student data erased permanently', deleted: result.rowCount });
@@ -296,7 +312,7 @@ app.post('/api/erase-all-data', authMiddleware, async (req, res) => {
 });
 
 // ── Delete SELECTED students (permanent) ──
-app.post('/api/delete-selected-students', authMiddleware, async (req, res) => {
+app.post('/api/delete-selected-students', authMiddleware, adminOnly, async (req, res) => {
   const { student_codes } = req.body;
   if (!student_codes || !Array.isArray(student_codes) || student_codes.length === 0) {
     return res.status(400).json({ error: 'Invalid student codes' });
@@ -319,7 +335,7 @@ app.get('/api/bulk-upload-template', (req, res) => {
 });
 
 // ── Bulk upload students via CSV ──
-app.post('/api/bulk-upload', authMiddleware, upload.single('file'), async (req, res) => {
+app.post('/api/bulk-upload', authMiddleware, adminOnly, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }

@@ -20,6 +20,7 @@ export default function Login({ onLogin }) {
     try {
       const res = await axios.post('/api/login', { username, password });
       localStorage.setItem('auth_token', res.data.token);
+      localStorage.setItem('user_role', res.data.role); // Store role
       onLogin(res.data.token);
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed. Please try again.');

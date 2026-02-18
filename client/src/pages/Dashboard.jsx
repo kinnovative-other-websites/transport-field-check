@@ -27,6 +27,7 @@ export default function Dashboard() {
 
   const handleLogout = () => {
     localStorage.removeItem('auth_token');
+    localStorage.removeItem('user_role');
     window.location.reload();
   };
   
@@ -49,6 +50,10 @@ export default function Dashboard() {
   const [branchFilter, setBranchFilter] = useState('');
   const [routeFilter, setRouteFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+
+  // Role State
+  const [role, setRole] = useState(localStorage.getItem('user_role') || 'viewer');
+  const isAdmin = role === 'admin';
   
   // Filter Options State
   const [branches, setBranches] = useState([]);
@@ -443,20 +448,26 @@ export default function Dashboard() {
             }} disabled={syncing} title="Sync data">
               <RefreshCw size={15} className={syncing ? 'sync-spin' : ''} /> {syncing ? 'Syncing...' : 'Sync'}
             </button>
-            <button className="dash-btn primary" onClick={handleUploadCSV} disabled={uploading} title="Download template & upload CSV">
-              <Upload size={15} /> {uploading ? 'Uploading...' : 'Upload CSV'}
-            </button>
-            <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />
+            {isAdmin && (
+              <button className="dash-btn primary" onClick={handleUploadCSV} disabled={uploading} title="Download template & upload CSV">
+                <Upload size={15} /> {uploading ? 'Uploading...' : 'Upload CSV'}
+              </button>
+            )}
+            {isAdmin && <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileUpload} style={{ display: 'none' }} />}
             <button className="dash-btn" onClick={handleExport}>
               <Download size={15} /> Export
             </button>
-            <button className="dash-btn danger" onClick={handleClearAll} title="Clear all student locations">
-              <Trash2 size={15} /> Clear All
-            </button>
-            <button className="dash-btn" onClick={handleEraseAllData} title="Permanently delete all data"
-              style={{ background: '#fff', color: '#dc2626', borderColor: '#fca5a5' }}>
-              <AlertTriangle size={15} /> Erase Data
-            </button>
+            {isAdmin && (
+              <>
+                <button className="dash-btn danger" onClick={handleClearAll} title="Clear all student locations">
+                  <Trash2 size={15} /> Clear All
+                </button>
+                <button className="dash-btn" onClick={handleEraseAllData} title="Permanently delete all data"
+                  style={{ background: '#fff', color: '#dc2626', borderColor: '#fca5a5' }}>
+                  <AlertTriangle size={15} /> Erase Data
+                </button>
+              </>
+            )}
             <div style={{ width: '1px', height: '28px', background: '#ddd', margin: '0 2px' }} />
             <button className="dash-btn" onClick={handleLogout} title="Sign out"
               style={{ padding: '8px 12px' }}>
@@ -556,14 +567,16 @@ export default function Dashboard() {
           <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#111' }}>
             {selectedStudents.length} student{selectedStudents.length !== 1 ? 's' : ''} selected
           </span>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button className="dash-btn danger" onClick={handleClearSelected} style={{ padding: '6px 12px' }}>
-              <MapPinOff size={15} /> Remove Locations
-            </button>
-            <button className="dash-btn" onClick={handleDeleteSelected} style={{ padding: '6px 12px', color: '#dc2626', borderColor: '#fca5a5' }}>
-              <Trash2 size={15} /> Delete Students
-            </button>
-          </div>
+            {isAdmin && (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="dash-btn danger" onClick={handleClearSelected} style={{ padding: '6px 12px' }}>
+                  <MapPinOff size={15} /> Remove Locations
+                </button>
+                <button className="dash-btn" onClick={handleDeleteSelected} style={{ padding: '6px 12px', color: '#dc2626', borderColor: '#fca5a5' }}>
+                  <Trash2 size={15} /> Delete Students
+                </button>
+              </div>
+            )}
         </div>
       )}
 
