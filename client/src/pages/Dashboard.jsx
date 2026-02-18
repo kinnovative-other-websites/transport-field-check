@@ -38,6 +38,7 @@ export default function Dashboard() {
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
   const [stats, setStats] = useState({ total: 0, logged: 0, pending: 0 });
