@@ -53,6 +53,31 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
+// Get global stats (Total, Logged, Pending)
+app.get('/api/stats', async (req, res) => {
+  try {
+    const totalQuery = 'SELECT COUNT(*) FROM students';
+    const loggedQuery = 'SELECT COUNT(*) FROM students WHERE latitude IS NOT NULL AND longitude IS NOT NULL';
+    
+    const [totalRes, loggedRes] = await Promise.all([
+      pool.query(totalQuery),
+      pool.query(loggedQuery)
+    ]);
+    
+    const total = parseInt(totalRes.rows[0].count);
+    const logged = parseInt(loggedRes.rows[0].count);
+    
+    res.json({
+      total,
+      logged,
+      pending: total - logged
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get all pending students for a branch
 app.get('/api/students/:branch', async (req, res) => {
   const { branch } = req.params;
@@ -64,6 +89,18 @@ app.get('/api/students/:branch', async (req, res) => {
     `;
     const result = await pool.query(query, [branch]);
     res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get distinct branches
+app.get('/api/branches', async (req, res) => {
+  try {
+    const query = 'SELECT DISTINCT branch_name FROM students ORDER BY branch_name ASC';
+    const result = await pool.query(query);
+    res.json(result.rows.map(row => row.branch_name).filter(Boolean));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
@@ -125,13 +162,93 @@ app.post('/api/log-location', async (req, res) => {
   }
 });
 
-// Get all data (dashboard only)
+// Get all data (dashboard only) - LEGACY (keep for now, or replace usage)
 app.get('/api/all-data', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM students ORDER BY student_name ASC');
     res.json(result.rows);
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── Paginated Students Endpoint (Optimized for Dashboard) ──
+app.get('/api/students-paginated', authMiddleware, async (req, res) => {
+  try {
+    const { page = 1, limit = 25, search = '', branch, route, status } = req.query;
+    
+    const offset = (page - 1) * limit;
+    const params = [];
+    let whereClauses = [];
+    let paramIndex = 1;
+
+    // Search filter
+    if (search) {
+      whereClauses.push(`(
+        student_name ILIKE $${paramIndex} OR 
+        student_code ILIKE $${paramIndex} OR 
+        student_id ILIKE $${paramIndex} OR 
+        branch_name ILIKE $${paramIndex} OR 
+        route_name ILIKE $${paramIndex}
+      )`);
+      params.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    // Branch filter
+    if (branch) {
+      whereClauses.push(`branch_name = $${paramIndex}`);
+      params.push(branch);
+      paramIndex++;
+    }
+
+    // Route filter
+    if (route) {
+      whereClauses.push(`route_name = $${paramIndex}`);
+      params.push(route);
+      paramIndex++;
+    }
+
+    // Status filter
+    if (status === 'logged') {
+      whereClauses.push(`(latitude IS NOT NULL AND longitude IS NOT NULL)`);
+    } else if (status === 'pending') {
+      whereClauses.push(`(latitude IS NULL OR longitude IS NULL)`);
+    }
+
+    const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    // Count Total (for pagination)
+    const countQuery = `SELECT COUNT(*) FROM students ${whereSQL}`;
+    const countResult = await pool.query(countQuery, params);
+    const total = parseInt(countResult.rows[0].count);
+
+    // Fetch Data
+    const dataQuery = `
+      SELECT * FROM students 
+      ${whereSQL}
+      ORDER BY student_name ASC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+    
+    // Add limit & offset to params
+    const queryParams = [...params, limit, offset];
+    
+    const result = await pool.query(dataQuery, queryParams);
+
+    res.json({
+      data: result.rows,
+      meta: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (err) {
+    console.error('Pagination Error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

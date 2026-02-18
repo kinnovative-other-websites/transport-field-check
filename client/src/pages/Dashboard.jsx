@@ -29,113 +29,135 @@ export default function Dashboard() {
     localStorage.removeItem('auth_token');
     window.location.reload();
   };
-  const [data, setData] = useState([]);
-  const [search, setSearch] = useState('');
+  
+  // State
+  const [data, setData] = useState([]); // This now holds ONLY current page data
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-
-  // Selection state
   const [selectedStudents, setSelectedStudents] = useState([]);
-
-  // Pagination state
+  
+  // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [stats, setStats] = useState({ total: 0, logged: 0, pending: 0 });
 
-  // Filters
+  // Filters State
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
   const [routeFilter, setRouteFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState(''); // '', 'logged', 'pending'
+  const [statusFilter, setStatusFilter] = useState('');
+  
+  // Filter Options State
+  const [branches, setBranches] = useState([]);
+  const [routes, setRoutes] = useState([]);
 
   // Bulk upload
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
-
-  // Toast notifications
   const [toasts, setToasts] = useState([]);
   const toastId = useRef(0);
+  const [confirmModal, setConfirmModal] = useState(null);
 
+  // Toast Helpers
   const showToast = useCallback((message, type = 'success') => {
     const id = ++toastId.current;
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
   }, []);
+  const removeToast = useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
 
-  const removeToast = useCallback((id) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  }, []);
+  // 1. Fetch Filter Options (Branches)
+  const fetchBranches = async () => {
+    try {
+      const res = await api.get('/api/branches');
+      setBranches(res.data);
+    } catch (err) { console.error(err); }
+  };
 
-  // Confirmation modal
-  const [confirmModal, setConfirmModal] = useState(null);
+  // 2. Fetch Routes when Branch changes
+  useEffect(() => {
+    if (!branchFilter) {
+      setRoutes([]);
+      return;
+    }
+    const fetchRoutes = async () => {
+      try {
+        const res = await api.get(`/api/routes/${encodeURIComponent(branchFilter)}`);
+        setRoutes(res.data);
+      } catch (err) { console.error(err); }
+    };
+    fetchRoutes();
+    setRouteFilter(''); // Reset route when branch changes
+  }, [branchFilter, api]);
 
-  useEffect(() => { fetchData(); }, []);
+  // 3. Debounce Search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setCurrentPage(1); // Reset to page 1 on search change
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [search]);
 
-  const fetchData = async (isSync = false) => {
+  // 4. Main Data Fetching (Server-Side)
+  const fetchData = useCallback(async (isSync = false) => {
     if (isSync) setSyncing(true); else setLoading(true);
     try {
-      const res = await api.get('/api/all-data');
-      setData(res.data);
+      const params = {
+        page: currentPage,
+        limit: rowsPerPage,
+        search: debouncedSearch,
+        branch: branchFilter,
+        route: routeFilter,
+        status: statusFilter
+      };
+      const res = await api.get('/api/students-paginated', { params });
+      
+      setData(res.data.data);
+      setTotalPages(res.data.meta.totalPages);
+      setTotalRecords(res.data.meta.total);
+
     } catch (err) {
       console.error(err);
+      showToast('Failed to load data', 'error');
     } finally {
       setLoading(false);
       setSyncing(false);
     }
+  }, [api, currentPage, rowsPerPage, debouncedSearch, branchFilter, routeFilter, statusFilter, showToast]);
+
+  // Initial Load
+  useEffect(() => {
+    fetchBranches();
+    fetchStats();
+  }, []);
+
+  const fetchStats = async () => {
+    try {
+      const res = await api.get('/api/stats');
+      setStats(res.data);
+    } catch (err) { console.error(err); }
   };
 
-  // ── Derived filter options ──
-  const branches = useMemo(() => [...new Set(data.map(d => d.branch_name).filter(Boolean))].sort(), [data]);
-  const routes = useMemo(() => {
-    const filtered = branchFilter ? data.filter(d => d.branch_name === branchFilter) : data;
-    return [...new Set(filtered.map(d => d.route_name).filter(Boolean))].sort();
-  }, [data, branchFilter]);
-
-  // ── Combined filter pipeline ──
-  const filteredData = useMemo(() => {
-    const lowerSearch = search.toLowerCase();
-    return data.filter(item => {
-      // Search
-      const matchesSearch = !search ||
-        (item.student_name && item.student_name.toLowerCase().includes(lowerSearch)) ||
-        (item.student_code && item.student_code.toLowerCase().includes(lowerSearch)) ||
-        (item.student_id && item.student_id.toLowerCase().includes(lowerSearch)) ||
-        (item.route_name && item.route_name.toLowerCase().includes(lowerSearch)) ||
-        (item.branch_name && item.branch_name.toLowerCase().includes(lowerSearch));
-      // Branch
-      const matchesBranch = !branchFilter || item.branch_name === branchFilter;
-      // Route
-      const matchesRoute = !routeFilter || item.route_name === routeFilter;
-      // Status
-      const matchesStatus =
-        !statusFilter ||
-        (statusFilter === 'logged' && item.latitude && item.longitude) ||
-        (statusFilter === 'pending' && (!item.latitude || !item.longitude));
-      return matchesSearch && matchesBranch && matchesRoute && matchesStatus;
-    });
-  }, [data, search, branchFilter, routeFilter, statusFilter]);
+  // Trigger Fetch on Dependency Change
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
     setSelectedStudents([]);
-  }, [search, branchFilter, routeFilter, statusFilter]);
+  }, [branchFilter, routeFilter, statusFilter]);
 
-  // Reset route when branch changes
-  useEffect(() => { setRouteFilter(''); }, [branchFilter]);
-
-  // ── Stats (from full data, not filtered) ──
-  const stats = useMemo(() => {
-    const total = data.length;
-    const logged = data.filter(d => d.latitude && d.longitude).length;
-    return { total, logged, pending: total - logged };
-  }, [data]);
-
-  // ── Pagination ──
-  const totalPages = Math.max(1, Math.ceil(filteredData.length / rowsPerPage));
-  const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * rowsPerPage;
-    return filteredData.slice(start, start + rowsPerPage);
-  }, [filteredData, currentPage, rowsPerPage]);
-
+  // ── Stats (Simple counts from metadata if available, else placeholders) ──
+  // Note: Server-side stats would require a separate endpoint if we want accurate "Logged vs Pending" counts for the *whole* dataset while filtered.
+  // For now, we can use the `totalRecords` for the "Total" card.
+  // We'll simplisticly disable the detailed breakdown stats unless we add a specific stats endpoint.
+  
+  // Helper for pagination numbers
   const getPageNumbers = () => {
     const pages = [];
     const max = 5;
@@ -150,20 +172,34 @@ export default function Dashboard() {
   const handleExport = () => {
     setConfirmModal({
       title: 'Export Data',
-      message: `Export ${filteredData.length} record(s) to CSV?`,
-      onConfirm: () => {
-        const csv = Papa.unparse(filteredData);
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'student_location_data.csv';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showToast(`Exported ${filteredData.length} records to CSV`, 'success');
-        setConfirmModal(null);
+      message: `Export ALL matching records to CSV?`,
+      onConfirm: async () => {
+        try {
+          const params = {
+            limit: 100000, // Large limit for export
+            search: debouncedSearch,
+            branch: branchFilter,
+            route: routeFilter,
+            status: statusFilter
+          };
+          const res = await api.get('/api/students-paginated', { params });
+          const csv = Papa.unparse(res.data.data);
+          const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'student_location_data.csv';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          showToast(`Exported ${res.data.data.length} records to CSV`, 'success');
+        } catch (err) {
+          console.error(err);
+          showToast('Failed to export data', 'error');
+        } finally {
+          setConfirmModal(null);
+        }
       }
     });
   };
@@ -181,6 +217,7 @@ export default function Dashboard() {
           showToast('All locations cleared successfully!', 'success');
           setSelectedStudents([]);
           fetchData();
+          fetchStats(); // Update stats
         } catch (err) {
           console.error(err);
           showToast('Failed to clear locations.', 'error');
@@ -203,6 +240,7 @@ export default function Dashboard() {
           showToast(`Cleared locations for ${selectedStudents.length} student(s)`, 'success');
           setSelectedStudents([]);
           fetchData();
+          fetchStats(); // Update stats
         } catch (err) {
           console.error(err);
           showToast('Failed to clear selected locations.', 'error');
@@ -236,6 +274,7 @@ export default function Dashboard() {
                 showToast(`${res.data.deleted} student(s) deleted permanently.`, 'success');
                 setSelectedStudents([]);
                 fetchData();
+                fetchStats(); // Update stats
               } catch (err) {
                 console.error(err);
                 showToast('Failed to delete selected students.', 'error');
@@ -271,6 +310,7 @@ export default function Dashboard() {
                 showToast(`All data erased. ${res.data.deleted} record(s) deleted.`, 'success');
                 setSelectedStudents([]);
                 fetchData();
+                fetchStats(); // Update stats
               } catch (err) {
                 console.error(err);
                 showToast('Failed to erase data.', 'error');
@@ -309,6 +349,7 @@ export default function Dashboard() {
       });
       showToast(`Upload successful! ${res.data.inserted} inserted, ${res.data.updated} updated.`, 'success');
       fetchData();
+      fetchStats(); // Update stats
     } catch (err) {
       console.error(err);
       showToast(err.response?.data?.error || 'Upload failed.', 'error');
@@ -320,7 +361,7 @@ export default function Dashboard() {
 
   // ── Selection ──
   const handleSelectAll = () => {
-    const codes = paginatedData.map(s => s.student_code);
+    const codes = data.map(s => s.student_code);
     const all = codes.every(c => selectedStudents.includes(c));
     if (all) setSelectedStudents(prev => prev.filter(c => !codes.includes(c)));
     else setSelectedStudents(prev => [...new Set([...prev, ...codes])]);
@@ -328,7 +369,7 @@ export default function Dashboard() {
   const handleSelectOne = (code) => {
     setSelectedStudents(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
   };
-  const isAllPageSelected = paginatedData.length > 0 && paginatedData.every(s => selectedStudents.includes(s.student_code));
+  const isAllPageSelected = data.length > 0 && data.every(s => selectedStudents.includes(s.student_code));
 
   // ── Stat card click ──
   const handleStatClick = (type) => {
@@ -546,7 +587,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {paginatedData.map((student, i) => {
+              {data.map((student, i) => {
                 const isSelected = selectedStudents.includes(student.student_code);
                 const hasLocation = student.latitude && student.longitude;
                 return (
@@ -608,7 +649,7 @@ export default function Dashboard() {
         </div>
 
         {/* Empty state */}
-        {filteredData.length === 0 && (
+        {data.length === 0 && (
           <div style={{ padding: '4rem 2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
             <Search size={44} style={{ opacity: 0.15, marginBottom: '1rem' }} />
             <p style={{ margin: 0, fontWeight: 500 }}>No records found</p>
@@ -622,8 +663,7 @@ export default function Dashboard() {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px'
         }}>
           <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-            Showing <strong>{filteredData.length === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1}</strong>–<strong>{Math.min(currentPage * rowsPerPage, filteredData.length)}</strong> of <strong>{filteredData.length}</strong>
-            {filteredData.length !== data.length && <span> (filtered from {data.length})</span>}
+            Showing <strong>{totalRecords === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1}</strong>–<strong>{Math.min(currentPage * rowsPerPage, totalRecords)}</strong> of <strong>{totalRecords}</strong>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
