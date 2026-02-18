@@ -50,10 +50,5 @@ jobs:
           npm install --production
           
           # Restart PM2 process
-          if pm2 show transport-app > /dev/null; then
-            pm2 restart transport-app
-          else
-            pm2 start index.js --name transport-app
-          fi
-          
+          pm2 restart transport-backend
           pm2 save
