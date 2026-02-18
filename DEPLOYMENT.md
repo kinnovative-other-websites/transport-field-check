@@ -23,8 +23,8 @@ This guide describes how to deploy the Transport Application manually without Do
         student_code VARCHAR(255) UNIQUE NOT NULL,
         branch_name VARCHAR(255),
         route_name VARCHAR(255),
-        latitude DECIMAL,
-        longitude DECIMAL,
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     ```

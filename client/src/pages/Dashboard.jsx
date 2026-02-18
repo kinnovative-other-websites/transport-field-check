@@ -585,7 +585,7 @@ export default function Dashboard() {
                       {hasLocation ? (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                           <MapPin size={13} color="#333" />
-                          {Number(student.latitude).toFixed(4)}, {Number(student.longitude).toFixed(4)}
+                          {student.latitude}, {student.longitude}
                         </span>
                       ) : <span style={{ color: '#ccc' }}>—</span>}
                     </td>
