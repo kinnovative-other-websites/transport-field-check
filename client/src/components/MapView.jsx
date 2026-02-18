@@ -17,14 +17,20 @@ let DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
-// Helper to generate consistent colors for routes
-const stringToColor = (str) => {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
-    return '#' + '00000'.substring(0, 6 - c.length) + c;
+// Helper to generate consistent colors for routes using Golden Angle approximation
+// This ensures that even with 500+ routes, colors are as distinct as possible.
+const getRouteColors = (routes) => {
+    const uniqueRoutes = [...new Set(routes)].sort(); // Sort for deterministic assignment
+    const colorMap = {};
+    
+    uniqueRoutes.forEach((route, index) => {
+        // Golden Angle ≈ 137.508°
+        // Using this angle prevents color cycles from aligning with simple fractions of the circle
+        const hue = (index * 137.508) % 360; 
+        colorMap[route] = `hsl(${hue}, 75%, 45%)`; // High saturation, slightly dark for visibility on map
+    });
+    
+    return colorMap;
 };
 
 // Component to auto-fit map bounds
@@ -64,15 +70,21 @@ export default function MapView({ api, branchFilter, routeFilter }) {
     }, [api, branchFilter, routeFilter]);
 
     // Group students by route for polylines
-    const routeGroups = useMemo(() => {
+    const { routeGroups, routeColors } = useMemo(() => {
         const groups = {};
+        const allRoutes = new Set();
+        
         locations.forEach(student => {
             if (!groups[student.route_name]) {
                 groups[student.route_name] = [];
             }
             groups[student.route_name].push(student);
+            allRoutes.add(student.route_name);
         });
-        return groups;
+        
+        const colors = getRouteColors(Array.from(allRoutes));
+        
+        return { routeGroups: groups, routeColors: colors };
     }, [locations]);
 
     // Calculate all points for bounds
@@ -98,14 +110,14 @@ export default function MapView({ api, branchFilter, routeFilter }) {
 
                 {/* Draw Routes (Polylines) */}
                 {Object.entries(routeGroups).map(([route, students]) => {
-                    const color = stringToColor(route);
+                    const color = routeColors[route] || '#333';
                     const positions = students.map(s => [parseFloat(s.latitude), parseFloat(s.longitude)]);
                     
                     return (
                         <Polyline 
                             key={route} 
                             positions={positions} 
-                            pathOptions={{ color, weight: 4, opacity: 0.7 }} 
+                            pathOptions={{ color, weight: 4, opacity: 0.8 }} 
                         />
                     );
                 })}
