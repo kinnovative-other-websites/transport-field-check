@@ -671,11 +671,6 @@ export default function Dashboard() {
                 api={api} 
                 branchFilter={branchFilter}
                 routeFilter={routeFilter}
-             />
-             <MapView 
-                api={api} 
-                branchFilter={branchFilter}
-                routeFilter={routeFilter}
                 mapVersion={mapVersion}
              />
           </div>
