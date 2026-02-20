@@ -4,6 +4,8 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const Papa = require('papaparse');
 const pool = require('./db');
+const pool = require('./db');
+const RouteService = require('./services/RouteService');
 require('dotenv').config();
 
 const app = express();
@@ -91,7 +93,7 @@ app.get('/api/students/:branch', async (req, res) => {
   const { branch } = req.params;
   try {
     const query = `
-      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number
+      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number as vehicle_name
       FROM students s
       LEFT JOIN branches b ON s.branch_id = b.id
       LEFT JOIN routes r ON s.route_id = r.id
@@ -143,7 +145,7 @@ app.get('/api/students/:branch/:route', async (req, res) => {
   const { branch, route } = req.params;
   try {
     const query = `
-      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number
+      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number as vehicle_name
       FROM students s
       LEFT JOIN branches b ON s.branch_id = b.id
       LEFT JOIN routes r ON s.route_id = r.id
@@ -188,7 +190,7 @@ app.post('/api/log-location', async (req, res) => {
 app.get('/api/all-data', authMiddleware, async (req, res) => {
   try {
     const query = `
-      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number
+      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number as vehicle_name
       FROM students s
       LEFT JOIN branches b ON s.branch_id = b.id
       LEFT JOIN routes r ON s.route_id = r.id
@@ -262,7 +264,7 @@ app.get('/api/students-paginated', authMiddleware, async (req, res) => {
 
     // Fetch Data
     const dataQuery = `
-      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number
+      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number as vehicle_name
       FROM students s
       LEFT JOIN branches b ON s.branch_id = b.id
       LEFT JOIN routes r ON s.route_id = r.id
@@ -494,6 +496,94 @@ app.post('/api/bulk-upload', authMiddleware, adminOnly, upload.single('file'), a
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+// ── Route Optimization Endpoints ──
+
+// Trigger Optimization
+app.post('/api/optimize-route', authMiddleware, adminOnly, async (req, res) => {
+  const { vehicle_id, branch_id } = req.body;
+  if (!vehicle_id || !branch_id) {
+    return res.status(400).json({ error: 'vehicle_id and branch_id are required' });
+  }
+  try {
+    const result = await RouteService.optimizeRoute(vehicle_id, branch_id);
+    res.json(result);
+  } catch (err) {
+    console.error('Optimization Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get Optimized Route
+app.get('/api/vehicle-route/:vehicleId', authMiddleware, async (req, res) => {
+  const { vehicleId } = req.params;
+  try {
+    const result = await RouteService.getOptimizedRoute(vehicleId);
+    if (!result) {
+      return res.status(404).json({ message: 'No optimized route found' });
+    }
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+// Helper to retrieve IDs from names
+async function getIdsFromNames(branchName, routeName) {
+  const branchRes = await pool.query('SELECT id, latitude, longitude FROM branches WHERE name = $1', [branchName]);
+  if (branchRes.rows.length === 0) throw new Error('Branch not found');
+  const branchId = branchRes.rows[0].id;
+  
+  // Find vehicle associated with this route (via students)
+  // We assume one vehicle per route for simplicity in this context
+  const vehicleRes = await pool.query(`
+    SELECT DISTINCT s.vehicle_id 
+    FROM students s
+    JOIN routes r ON s.route_id = r.id
+    WHERE s.branch_id = $1 AND r.route_name = $2 AND s.vehicle_id IS NOT NULL
+    LIMIT 1
+  `, [branchId, routeName]);
+
+  if (vehicleRes.rows.length === 0) throw new Error('No vehicle found for this route');
+  const vehicleId = vehicleRes.rows[0].vehicle_id;
+
+  return { branchId, vehicleId };
+}
+
+// Trigger Optimization by Name (for Dashboard)
+app.post('/api/optimize-route-by-name', authMiddleware, adminOnly, async (req, res) => {
+  const { branch_name, route_name } = req.body;
+  if (!branch_name || !route_name) {
+    return res.status(400).json({ error: 'branch_name and route_name are required' });
+  }
+  try {
+    const { branchId, vehicleId } = await getIdsFromNames(branch_name, route_name);
+    const result = await RouteService.optimizeRoute(vehicleId, branchId);
+    res.json(result);
+  } catch (err) {
+    console.error('Optimization Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get Optimized Route by Name (for MapView)
+app.get('/api/optimized-route', authMiddleware, async (req, res) => {
+  const { branch, route } = req.query;
+  if (!branch || !route) return res.json(null); // Return null if filters not set
+
+  try {
+    const { vehicleId } = await getIdsFromNames(branch, route);
+    const result = await RouteService.getOptimizedRoute(vehicleId);
+    if (!result) return res.json(null);
+    res.json(result);
+  } catch (err) {
+    // If specific error like "Vehicle not found", just return null so map doesn't break
+    console.error('Fetch Route Error:', err.message);
+    res.json(null); 
   }
 });
 

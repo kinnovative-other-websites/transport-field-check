@@ -3,7 +3,7 @@ import axios from 'axios';
 import Papa from 'papaparse';
 import {
   Download, Search, MapPin, Upload, Trash2, MapPinOff, Check,
-  ChevronLeft, ChevronRight, Filter, X, RefreshCw, CheckCircle, AlertCircle, Info, AlertTriangle, LogOut
+  ChevronLeft, ChevronRight, Filter, X, RefreshCw, CheckCircle, AlertCircle, Info, AlertTriangle, LogOut, Compass
 } from 'lucide-react';
 
 import MapView from '../components/MapView';
@@ -68,6 +68,10 @@ export default function Dashboard() {
   const [toasts, setToasts] = useState([]);
   const toastId = useRef(0);
   const [confirmModal, setConfirmModal] = useState(null);
+  
+  // Map Refresh Trigger
+  const [mapVersion, setMapVersion] = useState(0);
+  const [optimizing, setOptimizing] = useState(false);
 
   // Toast Helpers
   const showToast = useCallback((message, type = 'success') => {
@@ -368,6 +372,38 @@ export default function Dashboard() {
     }
   };
 
+  // ── Optimize Route ──
+  const handleOptimizeRoute = () => {
+    if (!branchFilter || !routeFilter) {
+      showToast('Please select both Branch and Route', 'error');
+      return;
+    }
+    
+    setConfirmModal({
+        title: 'Optimize Route Path',
+        message: `Generate optimized path for "${routeFilter}" (${branchFilter}) using Google Maps? This will update the stop order and polyline.`,
+        confirmText: 'Start Optimization',
+        onConfirm: async () => {
+            setConfirmModal(null);
+            setOptimizing(true);
+            try {
+                const res = await api.post('/api/optimize-route-by-name', {
+                    branch_name: branchFilter,
+                    route_name: routeFilter
+                });
+                
+                showToast(`Optimization Complete! Distance: ${(res.data.total_distance / 1000).toFixed(1)}km`, 'success');
+                setMapVersion(v => v + 1); // Trigger map refresh
+            } catch (err) {
+                console.error(err);
+                showToast(err.response?.data?.error || 'Optimization failed', 'error');
+            } finally {
+                setOptimizing(false);
+            }
+        }
+    });
+  };
+
   // ── Selection ──
   const handleSelectAll = () => {
     const codes = data.map(s => s.student_code);
@@ -582,6 +618,19 @@ export default function Dashboard() {
           {routes.map(r => <option key={r} value={r}>{r}</option>)}
         </select>
 
+        {/* Optimize Button (Visible when filters selected) */}
+        {isAdmin && branchFilter && routeFilter && (
+            <button 
+                className="dash-btn" 
+                onClick={handleOptimizeRoute}
+                disabled={optimizing}
+                style={{ background: '#f0fdf4', color: '#166534', borderColor: '#86efac' }}
+            >
+                <Compass size={15} className={optimizing ? 'sync-spin' : ''} /> 
+                {optimizing ? 'Optimizing...' : 'Optimize Route'}
+            </button>
+        )}
+
         {/* Clear filters */}
         {hasActiveFilters && (
           <button className="dash-btn" onClick={clearAllFilters} style={{ padding: '6px 10px', fontSize: '0.78rem' }}>
@@ -622,6 +671,12 @@ export default function Dashboard() {
                 api={api} 
                 branchFilter={branchFilter}
                 routeFilter={routeFilter}
+             />
+             <MapView 
+                api={api} 
+                branchFilter={branchFilter}
+                routeFilter={routeFilter}
+                mapVersion={mapVersion}
              />
           </div>
           <div style={{ marginTop: '10px', fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', gap: '20px', alignItems: 'center', justifyContent: 'center' }}>

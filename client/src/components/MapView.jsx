@@ -17,20 +17,43 @@ let DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
-// Helper to generate consistent colors for routes using Golden Angle approximation
-// This ensures that even with 500+ routes, colors are as distinct as possible.
-const getRouteColors = (routes) => {
-    const uniqueRoutes = [...new Set(routes)].sort(); // Sort for deterministic assignment
-    const colorMap = {};
-    
-    uniqueRoutes.forEach((route, index) => {
-        // Golden Angle ≈ 137.508°
-        // Using this angle prevents color cycles from aligning with simple fractions of the circle
-        const hue = (index * 137.508) % 360; 
-        colorMap[route] = `hsl(${hue}, 75%, 45%)`; // High saturation, slightly dark for visibility on map
+// Helper: Decode Google Polyline encoded string
+const decodePolyline = (encoded) => {
+    if (!encoded) return [];
+    var points = [];
+    var index = 0, len = encoded.length;
+    var lat = 0, lng = 0;
+    while (index < len) {
+        var b, shift = 0, result = 0;
+        do {
+            b = encoded.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        var dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        lat += dlat;
+        shift = 0;
+        result = 0;
+        do {
+            b = encoded.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        var dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        lng += dlng;
+        points.push([lat / 1e5, lng / 1e5]);
+    }
+    return points;
+};
+
+// Helper: Create a numbered icon
+const createNumberedIcon = (number) => {
+    return L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div style="background-color: #ef4444; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; justify-content: center; align-items: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${number}</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
     });
-    
-    return colorMap;
 };
 
 // Component to auto-fit map bounds
@@ -45,9 +68,10 @@ const RecenterAutomatically = ({ points }) => {
     return null;
 };
 
-export default function MapView({ api, branchFilter, routeFilter }) {
+export default function MapView({ api, branchFilter, routeFilter, mapVersion }) {
     const [locations, setLocations] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [optimizedRoute, setOptimizedRoute] = useState(null);
 
     useEffect(() => {
         const fetchLocations = async () => {
@@ -67,35 +91,62 @@ export default function MapView({ api, branchFilter, routeFilter }) {
         };
 
         fetchLocations();
-    }, [api, branchFilter, routeFilter]);
+    }, [api, branchFilter, routeFilter, mapVersion]); // Refetch locations too? Maybe not needed but harmless.
 
-    // Group students by route for polylines
-    const { routeGroups, routeColors } = useMemo(() => {
-        const groups = {};
-        const allRoutes = new Set();
-        
-        locations.forEach(student => {
-            if (!groups[student.route_name]) {
-                groups[student.route_name] = [];
+    // Fetch Optimized Route if filters are active
+    useEffect(() => {
+        if (!branchFilter || !routeFilter) {
+            setOptimizedRoute(null);
+            return;
+        }
+        const fetchOptimizedRoute = async () => {
+            try {
+                const res = await api.get('/api/optimized-route', {
+                    params: { branch: branchFilter, route: routeFilter, v: mapVersion } // force refresh
+                });
+                if (res.data) {
+                    setOptimizedRoute({
+                        ...res.data,
+                        decodedPath: decodePolyline(res.data.polyline)
+                    });
+                } else {
+                    setOptimizedRoute(null);
+                }
+            } catch (err) {
+                // console.error("Failed to fetch optimized route", err);
+                setOptimizedRoute(null);
             }
-            groups[student.route_name].push(student);
-            allRoutes.add(student.route_name);
-        });
-        
-        const colors = getRouteColors(Array.from(allRoutes));
-        
-        return { routeGroups: groups, routeColors: colors };
-    }, [locations]);
+        };
+        fetchOptimizedRoute();
+    }, [api, branchFilter, routeFilter, locations, mapVersion]); // Re-fetch on version change
 
     // Calculate all points for bounds
-    const allPoints = useMemo(() => 
-        locations.map(s => [parseFloat(s.latitude), parseFloat(s.longitude)]), 
-    [locations]);
+    const allPoints = useMemo(() => {
+        const points = locations.map(s => [parseFloat(s.latitude), parseFloat(s.longitude)]);
+        if (optimizedRoute && optimizedRoute.decodedPath) {
+            return [...points, ...optimizedRoute.decodedPath];
+        }
+        return points;
+    }, [locations, optimizedRoute]);
+
+    // stop map for fast lookup
+    const studentStops = useMemo(() => {
+        if (!optimizedRoute || !optimizedRoute.stop_order) return {};
+        const map = {};
+        
+        // Ensure stop_order is array
+        let stops = optimizedRoute.stop_order;
+        if (typeof stops === 'string') stops = JSON.parse(stops); // just in case
+
+        stops.forEach((stop, index) => {
+           map[stop.student_code] = index + 1;
+        });
+        return map;
+    }, [optimizedRoute]);
 
     if (loading) return <div style={{ padding: '2rem', textAlign: 'center' }}>Loading Map Data...</div>;
 
-    // Default center (can be anywhere, will be overridden by RecenterAutomatically)
-    const defaultCenter = [17.3850, 78.4867]; // Hyderabad approx
+    const defaultCenter = [17.3850, 78.4867];
 
     return (
         <div style={{ height: '600px', width: '100%', borderRadius: '12px', overflow: 'hidden', border: '1px solid #d4d4d4', zIndex: 0 }}>
@@ -105,38 +156,38 @@ export default function MapView({ api, branchFilter, routeFilter }) {
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
                 
-                {/* Auto-fit bounds */}
                 <RecenterAutomatically points={allPoints} />
 
-                {/* Draw Routes (Polylines) */}
-                {Object.entries(routeGroups).map(([route, students]) => {
-                    const color = routeColors[route] || '#333';
-                    const positions = students.map(s => [parseFloat(s.latitude), parseFloat(s.longitude)]);
-                    
-                    return (
-                        <Polyline 
-                            key={route} 
-                            positions={positions} 
-                            pathOptions={{ color, weight: 4, opacity: 0.8 }} 
-                        />
-                    );
-                })}
+                {/* Draw Optimized Route Key Polyline if available */}
+                {optimizedRoute && optimizedRoute.decodedPath && (
+                    <Polyline 
+                        positions={optimizedRoute.decodedPath}
+                        pathOptions={{ color: '#ef4444', weight: 5, opacity: 0.9 }} 
+                    />
+                )}
 
                 {/* Draw Markers */}
-                {locations.map((student, idx) => (
-                    <Marker 
-                        key={idx} 
-                        position={[parseFloat(student.latitude), parseFloat(student.longitude)]}
-                    >
-                        <Popup>
-                            <div style={{ minWidth: '150px' }}>
-                                <strong>{student.student_name}</strong><br/>
-                                <span style={{ fontSize: '0.85rem', color: '#666' }}>ID: {student.student_id}</span><br/>
-                                <span style={{ fontSize: '0.85rem', color: '#666' }}>Route: {student.route_name}</span>
-                            </div>
-                        </Popup>
-                    </Marker>
-                ))}
+                {locations.map((student, idx) => {
+                    const stopNumber = studentStops[student.student_code];
+                    const markerIcon = stopNumber ? createNumberedIcon(stopNumber) : DefaultIcon;
+
+                    return (
+                        <Marker 
+                            key={idx} 
+                            position={[parseFloat(student.latitude), parseFloat(student.longitude)]}
+                            icon={markerIcon}
+                        >
+                            <Popup>
+                                <div style={{ minWidth: '150px' }}>
+                                    {stopNumber && <div style={{background: '#ef4444', color: 'white', display: 'inline-block', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', marginBottom: '4px'}}>STOP #{stopNumber}</div>}
+                                    <strong>{student.student_name}</strong><br/>
+                                    <span style={{ fontSize: '0.85rem', color: '#666' }}>ID: {student.student_id}</span><br/>
+                                    <span style={{ fontSize: '0.85rem', color: '#666' }}>Route: {student.route_name}</span>
+                                </div>
+                            </Popup>
+                        </Marker>
+                    );
+                })}
             </MapContainer>
         </div>
     );
