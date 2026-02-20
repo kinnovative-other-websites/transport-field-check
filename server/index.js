@@ -10,8 +10,7 @@ const app = express();
 const port = process.env.PORT || 3055;
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Auth config (hardcoded credentials)
-// Auth config (hardcoded credentials)
+// Auth config
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
 const VIEW_USER = process.env.VIEW_USER || 'viewer';
@@ -22,7 +21,7 @@ app.use(cors());
 app.use(express.json());
 
 // ── Login endpoint ──
-app.get('/api/version', (req, res) => res.json({ version: '1.2.0', timestamp: new Date().toISOString() }));
+app.get('/api/version', (req, res) => res.json({ version: '1.3.0', timestamp: new Date().toISOString() }));
 
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
@@ -50,7 +49,7 @@ app.get('/api/verify-token', (req, res) => {
   }
 });
 
-// Auth middleware (only for dashboard endpoints)
+// Auth middleware
 const authMiddleware = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Authentication required' });
@@ -62,7 +61,7 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-// Get global stats (Total, Logged, Pending)
+// Get global stats
 app.get('/api/stats', async (req, res) => {
   try {
     const totalQuery = 'SELECT COUNT(*) FROM students';
@@ -92,9 +91,13 @@ app.get('/api/students/:branch', async (req, res) => {
   const { branch } = req.params;
   try {
     const query = `
-      SELECT * FROM students 
-      WHERE UPPER(branch_name) = UPPER($1) 
-      AND (latitude IS NULL OR longitude IS NULL)
+      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number
+      FROM students s
+      LEFT JOIN branches b ON s.branch_id = b.id
+      LEFT JOIN routes r ON s.route_id = r.id
+      LEFT JOIN vehicles v ON s.vehicle_id = v.id
+      WHERE UPPER(b.name) = UPPER($1) 
+      AND (s.latitude IS NULL OR s.longitude IS NULL)
     `;
     const result = await pool.query(query, [branch]);
     res.json(result.rows);
@@ -104,10 +107,10 @@ app.get('/api/students/:branch', async (req, res) => {
   }
 });
 
-// Get distinct branches
+// Get distinct branches (from branches table)
 app.get('/api/branches', async (req, res) => {
   try {
-    const query = 'SELECT DISTINCT branch_name FROM students ORDER BY branch_name ASC';
+    const query = 'SELECT name as branch_name FROM branches ORDER BY name ASC';
     const result = await pool.query(query);
     res.json(result.rows.map(row => row.branch_name).filter(Boolean));
   } catch (err) {
@@ -116,14 +119,16 @@ app.get('/api/branches', async (req, res) => {
   }
 });
 
-// Get distinct routes for a branch
+// Get distinct routes for a branch (from routes table joined with branches)
 app.get('/api/routes/:branch', async (req, res) => {
   const { branch } = req.params;
   try {
     const query = `
-      SELECT DISTINCT route_name FROM students 
-      WHERE UPPER(branch_name) = UPPER($1)
-      ORDER BY route_name ASC
+      SELECT r.route_name 
+      FROM routes r
+      JOIN branches b ON r.branch_id = b.id
+      WHERE UPPER(b.name) = UPPER($1)
+      ORDER BY r.route_name ASC
     `;
     const result = await pool.query(query, [branch]);
     res.json(result.rows.map(row => row.route_name));
@@ -138,10 +143,14 @@ app.get('/api/students/:branch/:route', async (req, res) => {
   const { branch, route } = req.params;
   try {
     const query = `
-      SELECT * FROM students 
-      WHERE UPPER(branch_name) = UPPER($1) 
-      AND route_name = $2 
-      AND (latitude IS NULL OR longitude IS NULL)
+      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number
+      FROM students s
+      LEFT JOIN branches b ON s.branch_id = b.id
+      LEFT JOIN routes r ON s.route_id = r.id
+      LEFT JOIN vehicles v ON s.vehicle_id = v.id
+      WHERE UPPER(b.name) = UPPER($1) 
+      AND r.route_name = $2 
+      AND (s.latitude IS NULL OR s.longitude IS NULL)
     `;
     const result = await pool.query(query, [branch, route]);
     res.json(result.rows);
@@ -158,10 +167,14 @@ app.post('/api/log-location', async (req, res) => {
       return res.status(400).json({ error: 'Invalid student codes' });
   }
   try {
+    // We need to update students. We check branch name matches via join or subquery.
     const query = `
-      UPDATE students 
-      SET latitude = $1, longitude = $2 
-      WHERE student_code = ANY($3) AND UPPER(branch_name) = UPPER($4)
+      UPDATE students s
+      SET latitude = $1, longitude = $2
+      FROM branches b
+      WHERE s.branch_id = b.id
+      AND s.student_code = ANY($3) 
+      AND UPPER(b.name) = UPPER($4)
     `;
     await pool.query(query, [latitude, longitude, student_codes, branch_name]);
     res.json({ message: 'Location logged successfully' });
@@ -171,10 +184,18 @@ app.post('/api/log-location', async (req, res) => {
   }
 });
 
-// Get all data (dashboard only) - LEGACY (keep for now, or replace usage)
+// Get all data (dashboard only) - LEGACY (Updated to join)
 app.get('/api/all-data', authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM students ORDER BY student_name ASC');
+    const query = `
+      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number
+      FROM students s
+      LEFT JOIN branches b ON s.branch_id = b.id
+      LEFT JOIN routes r ON s.route_id = r.id
+      LEFT JOIN vehicles v ON s.vehicle_id = v.id
+      ORDER BY s.student_name ASC
+    `;
+    const result = await pool.query(query);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -195,11 +216,11 @@ app.get('/api/students-paginated', authMiddleware, async (req, res) => {
     // Search filter
     if (search) {
       whereClauses.push(`(
-        student_name ILIKE $${paramIndex} OR 
-        student_code ILIKE $${paramIndex} OR 
-        student_id ILIKE $${paramIndex} OR 
-        branch_name ILIKE $${paramIndex} OR 
-        route_name ILIKE $${paramIndex}
+        s.student_name ILIKE $${paramIndex} OR 
+        s.student_code ILIKE $${paramIndex} OR 
+        s.student_id ILIKE $${paramIndex} OR 
+        b.name ILIKE $${paramIndex} OR 
+        r.route_name ILIKE $${paramIndex}
       )`);
       params.push(`%${search}%`);
       paramIndex++;
@@ -207,37 +228,47 @@ app.get('/api/students-paginated', authMiddleware, async (req, res) => {
 
     // Branch filter
     if (branch) {
-      whereClauses.push(`branch_name = $${paramIndex}`);
+      whereClauses.push(`b.name = $${paramIndex}`);
       params.push(branch);
       paramIndex++;
     }
 
     // Route filter
     if (route) {
-      whereClauses.push(`route_name = $${paramIndex}`);
+      whereClauses.push(`r.route_name = $${paramIndex}`);
       params.push(route);
       paramIndex++;
     }
 
     // Status filter
     if (status === 'logged') {
-      whereClauses.push(`(latitude IS NOT NULL AND longitude IS NOT NULL)`);
+      whereClauses.push(`(s.latitude IS NOT NULL AND s.longitude IS NOT NULL)`);
     } else if (status === 'pending') {
-      whereClauses.push(`(latitude IS NULL OR longitude IS NULL)`);
+      whereClauses.push(`(s.latitude IS NULL OR s.longitude IS NULL)`);
     }
 
     const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
     // Count Total (for pagination)
-    const countQuery = `SELECT COUNT(*) FROM students ${whereSQL}`;
+    // Need to join for filtering
+    const countQuery = `
+      SELECT COUNT(*) FROM students s
+      LEFT JOIN branches b ON s.branch_id = b.id
+      LEFT JOIN routes r ON s.route_id = r.id
+      ${whereSQL}
+    `;
     const countResult = await pool.query(countQuery, params);
     const total = parseInt(countResult.rows[0].count);
 
     // Fetch Data
     const dataQuery = `
-      SELECT * FROM students 
+      SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number
+      FROM students s
+      LEFT JOIN branches b ON s.branch_id = b.id
+      LEFT JOIN routes r ON s.route_id = r.id
+      LEFT JOIN vehicles v ON s.vehicle_id = v.id
       ${whereSQL}
-      ORDER BY student_name ASC
+      ORDER BY s.student_name ASC
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
     
@@ -267,30 +298,30 @@ app.get('/api/locations', authMiddleware, async (req, res) => {
   try {
     const { branch, route } = req.query;
     const params = [];
-    let whereClauses = ['latitude IS NOT NULL', 'longitude IS NOT NULL'];
+    let whereClauses = ['s.latitude IS NOT NULL', 's.longitude IS NOT NULL'];
     let paramIndex = 1;
 
     if (branch) {
-      whereClauses.push(`branch_name = $${paramIndex}`);
+      whereClauses.push(`b.name = $${paramIndex}`);
       params.push(branch);
       paramIndex++;
     }
 
     if (route) {
-      whereClauses.push(`route_name = $${paramIndex}`);
+      whereClauses.push(`r.route_name = $${paramIndex}`);
       params.push(route);
       paramIndex++;
     }
 
     const whereSQL = `WHERE ${whereClauses.join(' AND ')}`;
 
-    // Order by route and then student sequence (if available, else student_code)
-    // For now, ordering by route_name, then student_code to try and keep lines somewhat orderly
     const query = `
-      SELECT student_id, student_code, student_name, branch_name, route_name, latitude, longitude
-      FROM students
+      SELECT s.student_id, s.student_code, s.student_name, b.name as branch_name, r.route_name, s.latitude, s.longitude
+      FROM students s
+      LEFT JOIN branches b ON s.branch_id = b.id
+      LEFT JOIN routes r ON s.route_id = r.id
       ${whereSQL}
-      ORDER BY route_name ASC, student_code ASC
+      ORDER BY r.route_name ASC, s.student_code ASC
     `;
 
     const result = await pool.query(query, params);
@@ -311,7 +342,7 @@ const adminOnly = (req, res, next) => {
   }
 };
 
-// ── Clear ALL locations (latitude & longitude only) ──
+// ── Clear ALL locations ──
 app.post('/api/clear-all-locations', authMiddleware, adminOnly, async (req, res) => {
   try {
     await pool.query('UPDATE students SET latitude = NULL, longitude = NULL');
@@ -399,41 +430,73 @@ app.post('/api/bulk-upload', authMiddleware, adminOnly, upload.single('file'), a
       return res.status(400).json({ error: `Missing columns: ${missingCols.join(', ')}` });
     }
 
+    const client = await pool.connect();
     let inserted = 0;
     let updated = 0;
 
-    for (const row of rows) {
-      if (!row.student_id || !row.student_code || !row.student_name) continue; // skip invalid rows
-      const result = await pool.query(
-        `INSERT INTO students (student_id, student_code, student_name, section_name, branch_name, route_name)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (student_id) DO UPDATE SET
-           student_code = EXCLUDED.student_code,
-           student_name = EXCLUDED.student_name,
-           section_name = EXCLUDED.section_name,
-           branch_name = EXCLUDED.branch_name,
-           route_name = EXCLUDED.route_name
-         RETURNING (xmax = 0) AS is_insert`,
-        [
-          row.student_id.trim(),
-          row.student_code.trim(),
-          row.student_name.trim(),
-          (row.section_name || '').trim(),
-          row.branch_name.trim(),
-          row.route_name.trim()
-        ]
-      );
-      if (result.rows[0].is_insert) inserted++;
-      else updated++;
-    }
+    try {
+      await client.query('BEGIN');
 
-    res.json({ message: 'Upload successful', inserted, updated, total: rows.length });
+      for (const row of rows) {
+        if (!row.student_id || !row.student_code || !row.student_name) continue; 
+        
+        const branchName = row.branch_name.trim();
+        const routeName = row.route_name.trim();
+
+        // 1. Upsert Branch
+        let branchId;
+        const branchRes = await client.query(
+          'INSERT INTO branches (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id',
+          [branchName]
+        );
+        branchId = branchRes.rows[0].id;
+
+        // 2. Upsert Route
+        let routeId;
+        const routeRes = await client.query(
+          'INSERT INTO routes (branch_id, route_name) VALUES ($1, $2) ON CONFLICT (branch_id, route_name) DO UPDATE SET route_name = EXCLUDED.route_name RETURNING id',
+          [branchId, routeName]
+        );
+        routeId = routeRes.rows[0].id;
+
+        // 3. Upsert Student
+        const result = await client.query(
+          `INSERT INTO students (student_id, student_code, student_name, section_name, branch_id, route_id)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (student_id) DO UPDATE SET
+             student_code = EXCLUDED.student_code,
+             student_name = EXCLUDED.student_name,
+             section_name = EXCLUDED.section_name,
+             branch_id = EXCLUDED.branch_id,
+             route_id = EXCLUDED.route_id
+           RETURNING (xmax = 0) AS is_insert`,
+          [
+            row.student_id.trim(),
+            row.student_code.trim(),
+            row.student_name.trim(),
+            (row.section_name || '').trim(),
+            branchId,
+            routeId
+          ]
+        );
+        if (result.rows[0].is_insert) inserted++;
+        else updated++;
+      }
+
+      await client.query('COMMIT');
+      res.json({ message: 'Upload successful', inserted, updated, total: rows.length });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error', details: err.message });
   }
 });
 
-app.listen(port, '0.0.0.0', () => {
+app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
