@@ -50,7 +50,7 @@ const decodePolyline = (encoded) => {
 const createNumberedIcon = (number) => {
     return L.divIcon({
         className: 'custom-div-icon',
-        html: `<div style="background-color: #ef4444; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; justify-content: center; align-items: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${number}</div>`,
+        html: `<div style="background-color: #c42b2bff; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; justify-content: center; align-items: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${number}</div>`,
         iconSize: [24, 24],
         iconAnchor: [12, 12]
     });
