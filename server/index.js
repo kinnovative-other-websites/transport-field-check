@@ -4,7 +4,6 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const Papa = require('papaparse');
 const pool = require('./db');
-const pool = require('./db');
 const RouteService = require('./services/RouteService');
 require('dotenv').config();
 
