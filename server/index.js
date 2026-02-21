@@ -62,7 +62,7 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-// Middleware to restrict access to Admins only
+// Middleware to restrict access to Admins only (moved up for global use)
 const adminOnly = (req, res, next) => {
   if (req.user && req.user.role === 'admin') {
     next();
