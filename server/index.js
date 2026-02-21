@@ -62,6 +62,15 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
+// Middleware to restrict access to Admins only
+const adminOnly = (req, res, next) => {
+  if (req.user && req.user.role === 'admin') {
+    next();
+  } else {
+    res.status(403).json({ error: 'Access denied. Admin privileges required.' });
+  }
+};
+
 // Get global stats
 app.get('/api/stats', async (req, res) => {
   try {
@@ -395,14 +404,6 @@ app.get('/api/locations', authMiddleware, async (req, res) => {
   }
 });
 
-// Middleware to restrict access to Admins only
-const adminOnly = (req, res, next) => {
-  if (req.user && req.user.role === 'admin') {
-    next();
-  } else {
-    res.status(403).json({ error: 'Access denied. Admin privileges required.' });
-  }
-};
 
 // ── Clear ALL locations ──
 app.post('/api/clear-all-locations', authMiddleware, adminOnly, async (req, res) => {
