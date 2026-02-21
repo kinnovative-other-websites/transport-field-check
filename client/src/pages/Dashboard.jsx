@@ -61,6 +61,7 @@ export default function Dashboard() {
   // Filter Options State
   const [branches, setBranches] = useState([]);
   const [routes, setRoutes] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
 
   // Bulk upload
   const fileInputRef = useRef(null);
@@ -73,6 +74,12 @@ export default function Dashboard() {
   const [mapVersion, setMapVersion] = useState(0);
   const [optimizing, setOptimizing] = useState(false);
 
+  // Vehicle Modal State
+  const [assignVehicleModal, setAssignVehicleModal] = useState(false);
+  const [selectedVehicleId, setSelectedVehicleId] = useState('');
+  const [newVehicleNumber, setNewVehicleNumber] = useState('');
+  const [assigningVehicle, setAssigningVehicle] = useState(false);
+
   // Toast Helpers
   const showToast = useCallback((message, type = 'success') => {
     const id = ++toastId.current;
@@ -81,11 +88,18 @@ export default function Dashboard() {
   }, []);
   const removeToast = useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
 
-  // 1. Fetch Filter Options (Branches)
+  // 1. Fetch Filter Options (Branches & Vehicles)
   const fetchBranches = async () => {
     try {
       const res = await api.get('/api/branches');
       setBranches(res.data);
+    } catch (err) { console.error(err); }
+  };
+  
+  const fetchVehicles = async () => {
+    try {
+      const res = await api.get('/api/vehicles');
+      setVehicles(res.data);
     } catch (err) { console.error(err); }
   };
 
@@ -144,6 +158,7 @@ export default function Dashboard() {
   // Initial Load
   useEffect(() => {
     fetchBranches();
+    fetchVehicles();
     fetchStats();
   }, []);
 
@@ -404,6 +419,46 @@ export default function Dashboard() {
     });
   };
 
+  // ── Assign Vehicle ──
+  const handleAssignVehicleSubmit = async () => {
+    if (!selectedVehicleId && !newVehicleNumber.trim()) {
+      showToast('Please select a vehicle or enter a new vehicle number', 'error');
+      return;
+    }
+
+    setAssigningVehicle(true);
+    try {
+      let finalVehicleId = selectedVehicleId;
+
+      // Create new vehicle if requested
+      if (!finalVehicleId && newVehicleNumber.trim()) {
+        const createRes = await api.post('/api/vehicles', { 
+          vehicle_number: newVehicleNumber.trim() 
+        });
+        finalVehicleId = createRes.data.id;
+        fetchVehicles(); // Refresh vehicle list
+      }
+
+      // Assign to students
+      const res = await api.post('/api/assign-vehicle', {
+        vehicle_id: finalVehicleId,
+        student_codes: selectedStudents
+      });
+
+      showToast(res.data.message, 'success');
+      setAssignVehicleModal(false);
+      setSelectedVehicleId('');
+      setNewVehicleNumber('');
+      setSelectedStudents([]);
+      fetchData(); // Refresh table
+    } catch (err) {
+      console.error(err);
+      showToast(err.response?.data?.error || 'Failed to assign vehicle', 'error');
+    } finally {
+      setAssigningVehicle(false);
+    }
+  };
+
   // ── Selection ──
   const handleSelectAll = () => {
     const codes = data.map(s => s.student_code);
@@ -651,6 +706,18 @@ export default function Dashboard() {
           </span>
             {isAdmin && (
               <div style={{ display: 'flex', gap: '8px' }}>
+                <button 
+                  className="dash-btn primary" 
+                  onClick={() => {
+                    setSelectedVehicleId('');
+                    setNewVehicleNumber('');
+                    setAssignVehicleModal(true);
+                  }} 
+                  style={{ padding: '6px 12px' }}
+                >
+                  <MapPin size={15} /> Assign Vehicle
+                </button>
+                <div style={{ width: '1px', height: '24px', background: '#ccc', margin: '0 4px' }} />
                 <button className="dash-btn danger" onClick={handleClearSelected} style={{ padding: '6px 12px' }}>
                   <MapPinOff size={15} /> Remove Locations
                 </button>
@@ -826,6 +893,85 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+      )}
+
+      {/* ═══ Assign Vehicle Modal ═══ */}
+      {assignVehicleModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div className="dash-fade" style={{
+            background: 'white', padding: '2rem', borderRadius: '16px', width: '100%', maxWidth: '450px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
+          }}>
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', color: '#111' }}>Assign Vehicle</h3>
+            <p style={{ margin: '0 0 1.5rem 0', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+              Assign a vehicle to the {selectedStudents.length} selected student(s).
+            </p>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px', color: '#555' }}>
+                Select Existing Vehicle
+              </label>
+              <select 
+                className="dash-select" 
+                style={{ width: '100%' }}
+                value={selectedVehicleId}
+                onChange={(e) => {
+                  setSelectedVehicleId(e.target.value);
+                  if (e.target.value) setNewVehicleNumber(''); // Clear new input if selecting existing
+                }}
+              >
+                <option value="">-- Choose a Vehicle --</option>
+                {vehicles.map(v => (
+                  <option key={v.id} value={v.id}>{v.vehicle_number} (Capacity: {v.capacity})</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '1rem 0' }}>
+              <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#888', textTransform: 'uppercase' }}>OR</span>
+              <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }} />
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px', color: '#555' }}>
+                Create New Vehicle List
+              </label>
+              <input 
+                type="text" 
+                placeholder="e.g. Bus 12, AP09ABC1234" 
+                className="dash-select"
+                style={{ width: '100%' }}
+                value={newVehicleNumber}
+                onChange={(e) => {
+                  setNewVehicleNumber(e.target.value);
+                  if (e.target.value) setSelectedVehicleId(''); // Clear dropdown if typing new
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '2rem' }}>
+              <button 
+                className="dash-btn danger" 
+                onClick={() => setAssignVehicleModal(false)}
+                disabled={assigningVehicle}
+              >
+                Cancel
+              </button>
+              <button 
+                className="dash-btn primary" 
+                onClick={handleAssignVehicleSubmit}
+                disabled={assigningVehicle || (!selectedVehicleId && !newVehicleNumber.trim())}
+              >
+                {assigningVehicle ? 'Assigning...' : 'Assign Vehicle'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ═══ Toast Notifications ═══ */}

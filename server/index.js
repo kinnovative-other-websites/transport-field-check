@@ -185,8 +185,69 @@ app.post('/api/log-location', async (req, res) => {
   }
 });
 
+// ── Vehicle Management ──
+
+// Get all vehicles
+app.get('/api/vehicles', authMiddleware, async (req, res) => {
+  try {
+    const query = 'SELECT * FROM vehicles ORDER BY vehicle_number ASC';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create a new vehicle
+app.post('/api/vehicles', authMiddleware, adminOnly, async (req, res) => {
+  const { vehicle_number, capacity } = req.body;
+  if (!vehicle_number) {
+    return res.status(400).json({ error: 'Vehicle number is required' });
+  }
+  try {
+    const result = await pool.query(
+      'INSERT INTO vehicles (vehicle_number, capacity) VALUES ($1, $2) RETURNING *',
+      [vehicle_number, capacity || 50]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    if (err.code === '23505') { // Unique violation
+       return res.status(400).json({ error: 'A vehicle with this number already exists.' });
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Assign vehicle to students
+app.post('/api/assign-vehicle', authMiddleware, adminOnly, async (req, res) => {
+  const { vehicle_id, student_codes } = req.body;
+  
+  if (!vehicle_id || !student_codes || !Array.isArray(student_codes) || student_codes.length === 0) {
+    return res.status(400).json({ error: 'Vehicle ID and array of student codes are required' });
+  }
+
+  try {
+    const query = `
+      UPDATE students 
+      SET vehicle_id = $1 
+      WHERE student_code = ANY($2)
+    `;
+    const result = await pool.query(query, [vehicle_id, student_codes]);
+    res.json({ 
+      message: `Assigned vehicle to ${result.rowCount} student(s) successfully`,
+      updated: result.rowCount 
+    });
+  } catch (err) {
+    console.error('Assign Vehicle Error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get all data (dashboard only) - LEGACY (Updated to join)
 app.get('/api/all-data', authMiddleware, async (req, res) => {
+
   try {
     const query = `
       SELECT s.*, b.name as branch_name, r.route_name, v.vehicle_number as vehicle_name
